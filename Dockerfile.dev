@@ -1,7 +1,7 @@
 # Development Dockerfile for XAUUSD Trading System
 # This is a SKELETON — not for production use
 
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
