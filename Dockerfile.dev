@@ -1,0 +1,29 @@
+# Development Dockerfile for XAUUSD Trading System
+# This is a SKELETON — not for production use
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source code
+COPY src/ ./src/
+COPY configs/ ./configs/
+COPY tests/ ./tests/
+
+# Set PYTHONPATH
+ENV PYTHONPATH=/app
+
+# Default command: run tests
+CMD ["pytest", "tests/", "-v"]

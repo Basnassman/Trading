@@ -1,0 +1,41 @@
+# Development Docker Compose for XAUUSD Trading System
+# This is a SKELETON — not for production use
+
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: xauusd_trading
+      POSTGRES_USER: xauusd
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xauusd -d xauusd_trading"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    environment:
+      DATABASE_URL: postgresql://xauusd:dev_password@postgres:5432/xauusd_trading
+      PYTHONPATH: /app
+      LOG_LEVEL: DEBUG
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./configs:/app/configs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: pytest tests/ -v
+
+volumes:
+  postgres_data:
