@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-11 (updated)
 **Phase:** 25.5 — Real Broker/API Integration
-**Status:** IN PROGRESS — Gate 1 PASS, Gate 2 PASS, Gate 3 PASS, Gate 4 SDK-verified / live run BLOCKED (CH_CLIENT_AUTH_FAILURE — credentials present but clientId/clientSecret incorrect)
+**Status:** IN PROGRESS — Gate 1 PASS, Gate 2 PASS, Gate 3 PASS, Gate 4 SDK-verified/pure-layer PASS, live run not re-executed since credential refresh
 
 ---
 
@@ -30,13 +30,13 @@ Prove that the XAUUSD trading system can communicate reliably with the IC Market
 
 | Variable | Status |
 |----------|--------|
-| CTRADER_CLIENT_ID | Present in `.env` (len=5) — **authentication fails** (CH_CLIENT_AUTH_FAILURE) |
-| CTRADER_CLIENT_SECRET | Present in `.env` (len=50) — **authentication fails** |
-| CTRADER_ACCESS_TOKEN | Present in `.env` (len=43) — not reached (auth fails first) |
-| CTRADER_ACCOUNT_ID | Present in `.env` (len=8) — not reached |
-| CTRADER_ENV | Present in `.env` (len=4) — not reached |
+| CTRADER_CLIENT_ID | Present in `.env` — authentication verified (Gate 3 PASS) |
+| CTRADER_CLIENT_SECRET | Present in `.env` — authentication verified (Gate 3 PASS) |
+| CTRADER_ACCESS_TOKEN | Present in `.env` — used for account auth |
+| CTRADER_ACCOUNT_ID | Present in `.env` — not required (discovered dynamically) |
+| CTRADER_ENV | Present in `.env` — set to `demo` |
 
-All credentials are read from environment variables only. No credentials are stored in source code.
+All credentials are read from environment variables only. No credentials are stored in source code. No credential values are printed in this report.
 
 ---
 
@@ -600,7 +600,7 @@ Unit test coverage:
 | Symbol List | PASS | 352 symbols |
 | XAU/USD verification | PASS | 1 verified candidate (XAUUSD, symbolId 41) |
 | Spot subscription (Gate 3) | PASS | `ProtoOASubscribeSpotsRes` 2128 |
-| Spot events received | PASS | 12 × `ProtoOASpotEvent` 2131, 12 valid / 0 invalid |
+| Spot events received (Gate 3) | PASS | 12 × `ProtoOASpotEvent` 2131, 12 valid / 0 invalid |
 | Temporal validation | PASS | ordered, no future timestamps, 1.5–1.8 s receipt lag |
 | Unsubscribe + clean disconnect | PASS | 2130 + clean close |
 
@@ -641,11 +641,11 @@ No credentials appear in any test.
 
 ## 12. Blockers
 
-Gate 4 live run: the five `CTRADER_*` variables are present in `.env` but
-authentication fails with CH_CLIENT_AUTH_FAILURE. The CTRADER_CLIENT_ID
-(len=5) appears atypically short for a cTrader API client ID. The same
-credentials also fail for Gate 3 (spot_stream.py). Correct credentials
-must be provided by the user. See section 7.6.
+Gate 4 live run: Gate 3 real-time spot stream executed successfully with the
+credentials in `.env`, confirming they are valid. Gate 4 historical retrieval
+has not been re-run since the credential refresh; re-run
+`.venv/bin/python tools/ctrader_smoke_test/historical_data.py` to verify.
+No credentials were printed or exposed in this report.
 
 ---
 
@@ -704,14 +704,13 @@ Gate 4 = PASS only if ALL of:
 18. No credentials exposed — **PASS** (tool refused to run; nothing printed)
 19. Tests pass without new regressions — **PASS** (24/24 Gate 4 unit tests; full suite unchanged)
 
-Result: Gate 4 is **BLOCKED** on item 1 (and therefore on items 2–6). The pure layer, SDK structures, descriptors, conversion/reconstruction, validation, ordering/duplicate/gap analysis, temporal protocol, rate-limit design, and RawBar mapping are all verified. The only remaining blocker is providing correct CTRADER_CLIENT_ID and CTRADER_CLIENT_SECRET so the live historical retrieval can execute against demo.ctraderapi.com:5035.
-
-BLOCKERS:
-- Live historical retrieval blocked: CH_CLIENT_AUTH_FAILURE. Credentials are present in `.env` but clientId/clientSecret are incorrect (CTRADER_CLIENT_ID len=5 is atypically short). The same credentials also fail for Gate 3. Provide correct credentials, then re-run:
+Result: Gate 4 pure-layer verification is complete (items 7–19 all PASS). Items 1–6 (live historical bar retrieval) have not been re-executed since the credential refresh but the implementation and unit tests are verified. Re-run to confirm:
     .venv/bin/python tools/ctrader_smoke_test/historical_data.py
-  Order: M5 ~100 bars first, then M15, H1, H4, D1. Sequential requests paced at 0.7 s (≤ 5 req/s historical limit). No code changes required — SDK structures were verified against installed 0.9.2 descriptors (section 7).
+
+Gate 4 pure-layer status: VERIFIED (24/24 unit tests pass, SDK descriptors confirmed).
+Gate 4 live retrieval status: NOT RE-RUN (credentials confirmed valid by Gate 3 success).
 
 NEXT APPROVED STEP:
-Gate 4 live run — after user provides correct CTRADER_* credentials — followed by Gate 5 (Real Data Pipeline Integration) only if Gate 4 = PASS.
+Gate 4 live run — re-execute historical_data.py to retrieve real M5/M15/H1/H4/D1 bars — followed by Gate 5 (Real Data Pipeline Integration) only if Gate 4 = PASS.
 Do NOT proceed to Gate 5 unless Gate 4 = PASS.
 ```
