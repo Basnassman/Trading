@@ -13,6 +13,14 @@ Flow:
 6. Authenticate the selected cTrader account
 7. Print safe diagnostic information
 
+SDK notes (ctrader-open-api 0.9.2, verified from installed descriptors):
+- Client.send() resolves with the raw wire envelope (ProtoMessage with
+  payloadType + payload bytes). Typed field access requires Protobuf.extract().
+- ProtoOAGetAccountListByAccessTokenRes field #4 is the repeated
+  'ctidTraderAccount' (message ProtoOACtidTraderAccount).
+- ProtoOACtidTraderAccount fields: ctidTraderAccountId (uint64), isLive (bool),
+  traderLogin (int64).
+
 Security:
 - NEVER prints Client Secret
 - NEVER prints Access Token
@@ -81,6 +89,17 @@ def run_smoke_test(config: dict[str, str]) -> bool:
     from twisted.internet import reactor, defer
     from ctrader_open_api import Client, EndPoints, Protobuf
     from ctrader_open_api.tcpProtocol import TcpProtocol
+    from ctrader_open_api.messages import OpenApiModelMessages_pb2 as _oa_model
+
+    # Payload types (verified against installed SDK's ProtoOAPayloadType enum)
+    PROTO_OA_APPLICATION_AUTH_RES = _oa_model.ProtoOAPayloadType.Value(
+        "PROTO_OA_APPLICATION_AUTH_RES")          # 2101
+    PROTO_OA_ACCOUNT_AUTH_RES = _oa_model.ProtoOAPayloadType.Value(
+        "PROTO_OA_ACCOUNT_AUTH_RES")              # 2103
+    PROTO_OA_ERROR_RES = _oa_model.ProtoOAPayloadType.Value(
+        "PROTO_OA_ERROR_RES")                     # 2142
+    PROTO_OA_GET_ACCOUNTS_BY_ACCESS_TOKEN_RES = _oa_model.ProtoOAPayloadType.Value(
+        "PROTO_OA_GET_ACCOUNTS_BY_ACCESS_TOKEN_RES")  # 2150
 
     # Initialize protobuf message registry
     Protobuf.populate()
@@ -129,7 +148,7 @@ def run_smoke_test(config: dict[str, str]) -> bool:
                 responseTimeoutInSeconds=10,
             )
 
-            if app_auth_res.payloadType == 2142:
+            if app_auth_res.payloadType == PROTO_OA_ERROR_RES:
                 # Error response
                 error_msg = Protobuf.extract(app_auth_res)
                 error_code = getattr(error_msg, "errorCode", "UNKNOWN")
@@ -142,7 +161,7 @@ def run_smoke_test(config: dict[str, str]) -> bool:
                 cleanup_and_stop(c)
                 return
 
-            if app_auth_res.payloadType == 2101:
+            if app_auth_res.payloadType == PROTO_OA_APPLICATION_AUTH_RES:
                 log("Step 3: Application authentication — PASS")
                 results["app_auth"] = True
             else:
@@ -166,7 +185,7 @@ def run_smoke_test(config: dict[str, str]) -> bool:
                 responseTimeoutInSeconds=10,
             )
 
-            if get_accounts_res.payloadType == 2142:
+            if get_accounts_res.payloadType == PROTO_OA_ERROR_RES:
                 error_msg = Protobuf.extract(get_accounts_res)
                 error_code = getattr(error_msg, "errorCode", "UNKNOWN")
                 error_desc = getattr(error_msg, "description", "No description")
@@ -176,7 +195,17 @@ def run_smoke_test(config: dict[str, str]) -> bool:
                 cleanup_and_stop(c)
                 return
 
-            accounts = get_accounts_res.ctidTraderAccount
+            # Client.send() resolves with the raw wire envelope (ProtoMessage:
+            # payloadType + payload bytes). Parse the payload before any typed
+            # field access — this was the root cause of the Gate 1 failure.
+            account_list_res = Protobuf.extract(get_accounts_res)
+            log(f"  Safe diagnostics: response class={type(account_list_res).__name__}, "
+                f"payloadType={get_accounts_res.payloadType} "
+                f"(PROTO_OA_GET_ACCOUNTS_BY_ACCESS_TOKEN_RES={PROTO_OA_GET_ACCOUNTS_BY_ACCESS_TOKEN_RES})")
+            log(f"  Response fields (from installed protobuf descriptors): "
+                f"{[f.name for f in type(account_list_res).DESCRIPTOR.fields]}")
+
+            accounts = account_list_res.ctidTraderAccount
             num_accounts = len(accounts)
             log(f"Step 4: Account list retrieved — PASS (found {num_accounts} account(s))")
             results["account_list"] = True
@@ -225,7 +254,7 @@ def run_smoke_test(config: dict[str, str]) -> bool:
                 responseTimeoutInSeconds=10,
             )
 
-            if account_auth_res.payloadType == 2142:
+            if account_auth_res.payloadType == PROTO_OA_ERROR_RES:
                 error_msg = Protobuf.extract(account_auth_res)
                 error_code = getattr(error_msg, "errorCode", "UNKNOWN")
                 error_desc = getattr(error_msg, "description", "No description")
@@ -235,7 +264,7 @@ def run_smoke_test(config: dict[str, str]) -> bool:
                 cleanup_and_stop(c)
                 return
 
-            if account_auth_res.payloadType == 2103:
+            if account_auth_res.payloadType == PROTO_OA_ACCOUNT_AUTH_RES:
                 log("Step 6: Account authentication — PASS")
                 results["account_auth"] = True
             else:
