@@ -326,7 +326,7 @@ def log(msg: str) -> None:
 def load_env() -> dict[str, str]:
     load_dotenv()
     required = ["CTRADER_CLIENT_ID", "CTRADER_CLIENT_SECRET",
-                "CTRADER_ACCESS_TOKEN", "CTRADER_ACCOUNT_ID", "CTRADER_ENV"]
+                 "CTRADER_ACCESS_TOKEN", "CTRADER_ACCOUNT_ID", "CTRADER_ENV"]
     config, missing = {}, []
     for var in required:
         v = os.getenv(var)
@@ -353,7 +353,8 @@ INTER_REQUEST_DELAY_S = 0.7  # ~1.4 req/s historical; limit is 5 req/s
 
 
 def run_historical_test(config: dict[str, str]) -> bool:
-    from twisted.internet import reactor, defer
+    from twisted.internet import reactor , defer
+    from twisted.internet import task as twisted_task
     from ctrader_open_api import Client, EndPoints, Protobuf
     from ctrader_open_api.tcpProtocol import TcpProtocol
     from ctrader_open_api.messages import OpenApiModelMessages_pb2 as _oa
@@ -427,9 +428,9 @@ def run_historical_test(config: dict[str, str]) -> bool:
 
     @defer.inlineCallbacks
     def fetch_timeframe(c, tf: str):
-        plan = SAMPLE_PLAN[tf]
+        plan = SAMPLE_PLAN[tf] 
         to_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        from_ms = to_ms - plan["window_days"] * 24 * 3600 * 1000
+        from_ms = to_ms - plan["window_days"] * 24 * 3600 * 1000 
         req = Protobuf.get("GetTrendbarsReq")
         req.ctidTraderAccountId = state["ctid"]
         req.fromTimestamp = from_ms
@@ -588,11 +589,11 @@ def run_historical_test(config: dict[str, str]) -> bool:
 
         # Sequential historical requests, paced below the 5 req/s limit
         for tf in SAMPLE_PLAN:
-            yield defer.deferLater(reactor, INTER_REQUEST_DELAY_S, lambda: None)
+            yield twisted_task.deferLater(reactor, INTER_REQUEST_DELAY_S, lambda: None)
             try:
-                yield fetch_timeframe(c, tf)
+                result = yield fetch_timeframe(c, tf)
             except Exception as e:
-                log(f"[{tf}] request — FAIL: {type(e).__name__}: {e}")
+                log(f"[{tf}] request failed: {type(e).__name__}: {e}")
 
         log("Step: Closing connection (clean disconnect) ...")
         try:

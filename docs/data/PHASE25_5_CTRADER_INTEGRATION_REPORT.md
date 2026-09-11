@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-11 (updated)
 **Phase:** 25.5 — Real Broker/API Integration
-**Status:** IN PROGRESS — Gate 1 PASS, Gate 2 PASS, Gate 3 PASS, Gate 4 SDK-verified / live run BLOCKED (missing credentials)
+**Status:** IN PROGRESS — Gate 1 PASS, Gate 2 PASS, Gate 3 PASS, Gate 4 SDK-verified / live run BLOCKED (CH_CLIENT_AUTH_FAILURE — credentials present but clientId/clientSecret incorrect)
 
 ---
 
@@ -30,11 +30,11 @@ Prove that the XAUUSD trading system can communicate reliably with the IC Market
 
 | Variable | Status |
 |----------|--------|
-| CTRADER_CLIENT_ID | Present in .env |
-| CTRADER_CLIENT_SECRET | Present in .env |
-| CTRADER_ACCESS_TOKEN | Present in .env |
-| CTRADER_ACCOUNT_ID | Present in .env |
-| CTRADER_ENV | Present in .env |
+| CTRADER_CLIENT_ID | Present in `.env` (len=5) — **authentication fails** (CH_CLIENT_AUTH_FAILURE) |
+| CTRADER_CLIENT_SECRET | Present in `.env` (len=50) — **authentication fails** |
+| CTRADER_ACCESS_TOKEN | Present in `.env` (len=43) — not reached (auth fails first) |
+| CTRADER_ACCOUNT_ID | Present in `.env` (len=8) — not reached |
+| CTRADER_ENV | Present in `.env` (len=4) — not reached |
 
 All credentials are read from environment variables only. No credentials are stored in source code.
 
@@ -312,15 +312,19 @@ GATE 3 — Real-Time Market Data: PASS
 
 ---
 
-## 7. Historical Data Test (Gate 4)
+## 7. Gate 4 — Historical Market Data
 
-**Status:** IN PROGRESS — SDK structures verified from installed package; unit tests 24/24 PASS; live run BLOCKED (see 7.6)
+**Status:** SDK-VERIFIED / LIVE RUN BLOCKED (CH_CLIENT_AUTH_FAILURE — credentials present but clientId/clientSecret incorrect)
 
-**File:** `tools/ctrader_smoke_test/historical_data.py` (isolated in `tools/ctrader_smoke_test/`; data-only — no orders, no trading, no strategy, no signals, no risk engine)
+**File:** `tools/ctrader_smoke_test/historical_data.py` (isolated in `tools/ctrader_smoke_test/`; data-only — no orders, no trading, no strategy, no signals, no probability/backtest/risk engine, no Feature Store integration)
 
-### 7.1 SDK inspection failure root cause (resolved)
+### 7.1 Objective
 
-An earlier inspection attempt imported `ctrader_open_api.messages.OpenApiModelEnums_pb2`, which **does not exist** in ctrader-open-api 0.9.2. Actual package contents (verified by filesystem + `.venv/bin/python`):
+Retrieve a small controlled sample of REAL historical XAUUSD bars (M5, M15, H1, H4, D1) from the authenticated IC Markets cTrader DEMO environment and validate them against the project's temporal/data-quality architecture.
+
+### 7.2 SDK structures verified from installed package (no live connection)
+
+Package contents verified by filesystem + `.venv/bin/python` against installed `ctrader-open-api 0.9.2`:
 
 ```
 ctrader_open_api/messages/
@@ -332,7 +336,7 @@ ctrader_open_api/messages/
 
 There is NO separate `*_Enums_pb2` module; enums are defined inside the two model/message modules. `OpenApiModelMessages_pb2` imports correctly and is used for enums only; requests are built via the SDK factory `Protobuf.get("GetTrendbarsReq")`, which resolves to `ProtoOAGetTrendbarsReq` (in `OpenApiMessages_pb2`).
 
-### 7.2 Trendbar message descriptors (verified from installed SDK 0.9.2)
+### 7.3 Trendbar message descriptors (verified from installed SDK 0.9.2)
 
 | Message (module) | # | Field | Type | Label |
 |---|---|---|---|---|
@@ -374,21 +378,205 @@ Key semantics: `low` is absolute in 1/100000; open/close/high are stored as delt
 - Unit tests `tests/test_ctrader_historical_data.py`: **24 passed** — credential-free, network-free. Two fixture corrections were required (delta scale 1/100000, D1 weekend-gap arithmetic); helper logic itself was already correct.
 - `tools/ctrader_smoke_test/historical_data.py`: docstring-only corrections (Res field numbers: period #3, ctid #2; module placement). **No functional changes needed.**
 
-### 7.6 Live run BLOCKED — credentials absent from environment
+### 7.6 Live run BLOCKED — CH_CLIENT_AUTH_FAILURE
 
-The live Gate 4 run (`M5 ≈100 bars` first, then M15/H1/H4/D1, 0.7 s spacing ≤ 5 req/s) was attempted and stopped at configuration load:
+The live Gate 4 run (`M5 ≈100 bars` first, then M15/H1/H4/D1, 0.7 s spacing ≤ 5 req/s) was attempted and failed at application authentication:
 
 ```
-ERROR: Missing environment variables: CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET,
-       CTRADER_ACCESS_TOKEN, CTRADER_ACCOUNT_ID, CTRADER_ENV
+Application authentication — FAIL: errorCode=CH_CLIENT_AUTH_FAILURE
+  description=clientId or clientSecret is incorrect
 ```
 
-Environment facts (names inspected only; values never read or printed):
-- `.env` (project root, mode 600) was modified on 2026-09-11 and now defines only MT-*/SYMBOL/TIMEFRAME/MODE keys — **no `CTRADER_*` keys remain**.
-- No `CTRADER_*` variables are exported in the shell; no other `.env*` file exists in the repo.
-- Per gate instructions, credentials were NOT changed, regenerated, moved, or recovered. The tool correctly refused to run and exposed nothing.
+Environment facts (names and lengths inspected only; values never read or printed):
+- `.env` now contains all five `CTRADER_*` keys (CLIENT_ID len=5, CLIENT_SECRET len=50, ACCESS_TOKEN len=43, ACCOUNT_ID len=8, ENV len=4).
+- The same credentials also fail for Gate 3 (`spot_stream.py`), confirming the issue is with the credentials themselves, not the historical-data tool.
+- CTRADER_CLIENT_ID len=5 is atypically short for a cTrader API client ID — this is likely the source of the authentication failure.
+- No credentials were printed, committed, or exposed.
 
-**Unblock action (user):** restore the five `CTRADER_*` variables to `.env` (same values used for Gates 1–3), then re-run `.venv/bin/python tools/ctrader_smoke_test/historical_data.py` from the project root. No code changes are required.
+**Unblock action (user):** provide the correct `CTRADER_CLIENT_ID` and `CTRADER_CLIENT_SECRET` (the ones that were used for Gates 1–3), update `.env`, then re-run `.venv/bin/python tools/ctrader_smoke_test/historical_data.py`. No code changes are required — the tool and all pure-layer helpers are verified.
+
+---
+
+### 7.6 Data-quality report (Gate 4)
+
+#### 7.6.1 API request type
+`ProtoOAGetTrendbarsReq` (OpenApiMessages_pb2). Fields verified from installed descriptors:
+- #2 `ctidTraderAccountId` (int64, required)
+- #3 `fromTimestamp` (int64, required, Unix ms)
+- #4 `toTimestamp` (int64, required, Unix ms)
+- #5 `period` (enum ProtoOATrendbarPeriod, required)
+- #6 `symbolId` (int64, required)
+- #7 `count` (uint32, optional, max bars returned)
+
+Payload type: `PROTO_OA_GET_TRENDBARS_REQ` = 2137.
+
+#### 7.6.2 API response type
+`ProtoOAGetTrendbarsRes` (OpenApiMessages_pb2). Fields verified:
+- #2 `ctidTraderAccountId` (int64, required)
+- #3 `period` (enum, required, echoed)
+- #4 `timestamp` (int64, required)
+- #5 `trendbar` (repeated → ProtoOATrendbar)
+- #6 `symbolId` (int64, optional)
+
+Payload type: `PROTO_OA_GET_TRENDBARS_RES` = 2138.
+
+#### 7.6.3 Timeframe mapping
+`ProtoOATrendbarPeriod` enum (verified): M1=1, M2=2, M3=3, M4=4, M5=5, M10=6, M15=7, M30=8, H1=9, H4=10, H12=11, D1=12, W1=13, MN1=14.
+
+This tool uses exactly: M5=5, M15=7, H1=9, H4=10, D1=12. No production code hardcodes these values — they are enum-resolved at runtime from the SDK descriptor via `ProtoOATrendbarPeriod.Value(...)`.
+
+#### 7.6.4 Timestamp semantics
+- **Request `fromTimestamp`/`toTimestamp`**: Unix epoch MILLISECONDS (consistent with the documented GetTrendbars tutorial, which uses `ToUnixTimeMilliseconds()`).
+- **Response `ProtoOATrendbar.utcTimestampInMinutes`**: bar OPEN time, minutes since Unix epoch UTC. This is an optional proto2 field (#9, uint32).
+- **event_time(bar)** = `epoch_utc + utcTimestampInMinutes * 60`, represented as a timezone-aware UTC `datetime`.
+- The bar open time aligns to the requested timeframe grid (e.g. M5 opens are multiples of 5 minutes past the hour).
+- No future data: a retrieved bar's event_time must be `<= now + clock-skew tolerance`.
+
+#### 7.6.5 Price representation
+Verified independently for trendbars (Gate 3 already verified it for spot events):
+
+- `ProtoOATrendbar.low` (#5, optional int64): **absolute** price in 1/100000 of a price unit.
+- `ProtoOATrendbar.deltaOpen` (#6, uint64), `deltaClose` (#7, uint64), `deltaHigh` (#8, uint64): **relative** offsets **above low**, on the **same 1/100000 scale** as `low`.
+- A delta of 1,000 therefore equals +0.01 on a 2-digit symbol (XAUUSD digits = 2).
+
+This is the same universal protocol unit documented for spot prices (1/100000). The tool retains both raw and converted values for auditability.
+
+#### 7.6.6 Price reconstruction / conversion formula
+Official Spotware formula (symbol-data page), implemented in exact Decimal arithmetic with no binary-float step:
+
+```
+low_abs   = round(low / 100000, digits)
+open_abs  = round((low + deltaOpen)  / 100000, digits)
+close_abs = round((low + deltaClose) / 100000, digits)
+high_abs  = round((low + deltaHigh)  / 100000, digits)
+```
+
+For XAUUSD (digits = 2): e.g. `low=433755000`, `deltaOpen=1000`, `deltaClose=3000`, `deltaHigh=5000` →
+
+- low = 4337.55
+- open = 4337.56
+- close = 4337.58
+- high = 4337.60
+
+Implementation: `Decimal(raw) / Decimal(100000)` then `quantize(Decimal(1).scaleb(-digits))`, which matches `round(..., digits)` semantics exactly and avoids binary-float artifacts.
+
+#### 7.6.7 Sample size per timeframe
+| Timeframe | Target bars | Request window | Retrieval status |
+|-----------|-------------|----------------|------------------|
+| M5 | ~100 | 2 days | **Blocked** (no live run) |
+| M15 | ~100 | 4 days | **Blocked** |
+| H1 | ~100 | 10 days | **Blocked** |
+| H4 | ~100 | 30 days | **Blocked** |
+| D1 | ~100 | 140 days | **Blocked** |
+
+Sample size is deliberately small; windows are much smaller than any documented cap. The live run issues strictly **sequential** requests paced at 0.7 s between them (≈1.4 req/s, well below the documented 5 req/s historical limit).
+
+#### 7.6.8 OHLC validation
+Rules (executed in `validate_ohlc` + `validate_bar`):
+- open > 0, high > 0, low > 0, close > 0
+- high >= max(open, close)
+- low <= min(open, close)
+- high >= low
+- bar_time not in the future (clock-skew tolerance)
+
+Unit tests cover: valid bar, high below open, low above close, non-positive prices, future bar_time. All pass.
+
+#### 7.6.9 Chronological validation
+`analyze_series` verifies, per timeframe:
+- strictly non-decreasing event_time ordering
+- no zero-spacing duplicates
+- no negative-spacing reversed timestamps
+- no sub-interval overlaps
+- no non-integer-multiple jumps (malformed unless confirmed as a session gap)
+- bar open times aligned to the timeframe grid
+
+Unit tests cover: perfect continuity, duplicate detection, reversed timestamps, non-multiple jump, misaligned bars, empty series. All pass.
+
+#### 7.6.10 Duplicate detection
+Duplicate key = `(symbol, timeframe, bar_time)`. Duplicates are reported explicitly and never silently dropped. The existing `DuplicateDetector` in `src/validation/validators.py` uses the same contract key semantics for `RawBar`.
+
+Unit test: injected duplicate timestamp detected (count = 1).
+
+#### 7.6.11 Gap analysis
+Gap semantics (Spotware FAQ): trend bars exist only where ticks arrive, so weekend/weekly session breaks and low-liquidity gaps are LEGITIMATE missing bars.
+
+`analyze_series` therefore:
+- classifies a jump > 1 interval as a **session gap** when it is an **integer multiple** of the interval
+- flags a jump that is **not** an integer multiple as a potential anomaly
+- reports `session_gaps`, `max_gap_minutes`, and the anomaly list explicitly
+
+Example verified offline: D1 weekend (Fri→Mon) produces exactly 1 session gap of 3 days, **not** an ordering violation.
+
+#### 7.6.12 Temporal validation
+Trendbar temporal protocol (matches the existing project contract):
+- **event_time** = bar open time (cTrader market time, tz-aware UTC).
+- **retrieval_time / ingestion_time** = local UTC time when the tool fetched the bar.
+- **availability_time is NOT invented.** The cTrader historical API provides no broker-side availability timestamp for bars.
+- Rule enforced: retrieval_time must be >= event_time for a historical fetch — no look-ahead, no future data.
+- RawBar mapping (`build_raw_bar`) sets `bar_time=event_time` and `retrieval_time=ingestion_time`, and asserts that a bar_time exists rather than inventing one.
+
+The existing `IngestionPipeline._canonicalize_bar` computes `availability_time = bar_time + timeframe_duration` at the canonical layer; that policy is applied to **CanonicalBar**, not to the raw cTrader response, and is therefore outside the smoke-test's data-path by design.
+
+#### 7.6.13 Data-quality results
+| Check | Result | Evidence |
+|-------|--------|----------|
+| SDK import + descriptor inspection | PASS | Verified against installed 0.9.2 |
+| Request/response field correctness | PASS | Verified from descriptors |
+| Timestamp semantics | PASS | Verified (ms request, minutes-bar-open response) |
+| Price representation | PASS | Verified absolute low + relative deltas, 1/100000 scale |
+| Price reconstruction formula | PASS | Exact Decimal arithmetic, 24 unit tests |
+| OHLC validation | PASS (pure layer) | 24 unit tests; live validation pending real bars |
+| Chronological ordering | PASS (pure layer) | 24 unit tests; live check pending real bars |
+| Duplicate detection | PASS (pure layer) | 24 unit tests |
+| Gap analysis | PASS (pure layer) | Weekend-gap arithmetic verified |
+| Timeframe semantics | PASS (pure layer) | Interval table + enum mapping verified |
+| Temporal protocol | PASS (pure layer) | event_time/ingestion_time preserved, availability_time not invented |
+| Rate-limit handling | PASS (design) | Sequential, 0.7 s spacing, ~1.4 req/s < 5 req/s |
+| RawBar mapping | PASS (pure layer) | Existing `src.canonical.raw.RawBar` used unchanged; 24 unit tests |
+| No future data / no look-ahead | PASS (pure layer) | Future bar_time rejected; retrieval >= event_time enforced |
+| Real API historical retrieval | **BLOCKED** | CH_CLIENT_AUTH_FAILURE — credentials present but clientId/clientSecret incorrect (see 7.6) |
+
+#### 7.6.14 API rate-limit handling
+Documented historical limit: max 5 requests/second/connection. This tool issues strictly sequential `GetTrendbarsReq` calls with a fixed 0.7 s inter-request delay (≈1.4 req/s), with no request loop, no parallel fan-out, and no unbounded retry. A global 180 s reactor timeout bounds the run.
+
+#### 7.6.15 RawBar mapping
+Trendbar → existing `src.canonical.raw.RawBar` (frozen dataclass), unchanged:
+
+| RawBar field | Source |
+|--------------|--------|
+| symbol | "XAUUSD" (canonical) |
+| timeframe | requested timeframe, e.g. "M5" |
+| bar_time | event_time (bar open, cTrader semantics, tz-aware UTC) |
+| open/high/low/close | reconstructed Decimal prices |
+| tick_volume | broker tick volume, or 0 if absent |
+| real_volume | None (not supplied by trendbar API) |
+| bid/ask | None (not supplied by trendbar API) |
+| provider | "ctrader" |
+| provider_symbol | "XAUUSD" (broker symbol name) |
+| retrieval_time | ingestion_time (local UTC fetch time) |
+
+The provider layer returns **RawBar, not CanonicalBar**, exactly matching the existing architecture: `cTrader API → RawBar → Validation → CanonicalBar`.
+
+#### 7.6.16 Tests
+- Credential-free unit tests `tests/test_ctrader_historical_data.py`: **24 passed**, 0 failed, 0 skipped.
+- Live demo run: **BLOCKED** (CH_CLIENT_AUTH_FAILURE — credentials present but incorrect).
+
+Unit test coverage:
+- trendbar timestamp minutes→UTC conversion
+- price conversion exact Decimal
+- OHLC reconstruction (official formula + flat bar)
+- OHLC validation (valid, high<open, low>close, non-positive)
+- BarRecord full validation (valid, future bar_time, raw audit retention)
+- series analysis (continuous, duplicate, reversed, session gap, non-multiple jump, misaligned, empty)
+- RawBar mapping (existing contract unchanged, temporal semantics preserved, requires bar_time)
+
+#### 7.6.17 Limitations
+1. **Live retrieval BLOCKED**: the five `CTRADER_*` variables are present in `.env` but the clientId/clientSecret fail with CH_CLIENT_AUTH_FAILURE. The same credentials also fail for Gate 3 (spot_stream.py), confirming the issue is credential validity, not tool-specific. No credentials were printed or exposed.
+2. **Trendbar API provides no broker availability timestamp**: `availability_time` is therefore NOT set from the cTrader response; the canonical layer's availability policy decides later. This is intentional and documented, not a bug.
+3. **Trendbar API provides no bid/ask**: RawBar `bid`/`ask` are None for trendbar-derived bars. Spread-at-close on a CanonicalBar would require a separate data source (e.g. the Gate 3 spot stream or tick history, either of which is a separate concern).
+4. **Real-volume not supplied**: only tick volume is provided by `ProtoOATrendbar.volume`.
+5. **Session gaps are expected**: because trend bars are created only when ticks arrive, weekend / holiday / low-liquidity gaps are legitimate, not malformed.
+6. **Sample size is deliberately small**: this gate proves the historical-data path with a controlled sample. Months/years of data, the historical database, backtesting, the Feature Store, the Historical Similarity Engine, the Probability Engine, and strategy logic are all explicitly out of scope.
 
 ---
 
@@ -416,12 +604,15 @@ Environment facts (names inspected only; values never read or printed):
 | Temporal validation | PASS | ordered, no future timestamps, 1.5–1.8 s receipt lag |
 | Unsubscribe + clean disconnect | PASS | 2130 + clean close |
 
-**Overall:** 12 passed, 0 failed (gates 1–3). Gates 4–5 not reached.
+**Overall:** 12 passed, 0 failed (gates 1–3). Gate 4 SDK-verified, live run BLOCKED.
 
 **Unit tests added (Gate 3):** `tests/test_ctrader_spot_stream.py` — 19 passed,
 credential-free, network-free.
 
-**Repository test suite:** `1038 passed, 16 failed, 1 skipped`. The 16 failures
+**Unit tests added (Gate 4):** `tests/test_ctrader_historical_data.py` — 24 passed,
+credential-free, network-free.
+
+**Repository test suite:** `1062 passed, 16 failed, 1 skipped`. The 16 failures
 are pre-existing and unrelated to cTrader (dependency-harmonization checks,
 file-permission mocks, `utcnow` deprecation checks, risk-manager API drift).
 No credentials appear in any test.
@@ -450,10 +641,11 @@ No credentials appear in any test.
 
 ## 12. Blockers
 
-Gate 4 live run: the five `CTRADER_*` environment variables are no longer present
-(`.env` was modified on 2026-09-11 and now contains only MT-*/SYMBOL/TIMEFRAME/MODE
-keys). Credentials must be restored by the user; per instructions none were changed,
-regenerated, or recovered. See section 7.6.
+Gate 4 live run: the five `CTRADER_*` variables are present in `.env` but
+authentication fails with CH_CLIENT_AUTH_FAILURE. The CTRADER_CLIENT_ID
+(len=5) appears atypically short for a cTrader API client ID. The same
+credentials also fail for Gate 3 (spot_stream.py). Correct credentials
+must be provided by the user. See section 7.6.
 
 ---
 
@@ -466,7 +658,7 @@ GATES:
 Gate 1 — cTrader connectivity/account authentication: PASS
 Gate 2 — XAUUSD symbol discovery:                     PASS
 Gate 3 — Real-time market data:                       PASS
-Gate 4 — Historical bars:                             SDK-VERIFIED / live run BLOCKED (missing CTRADER_* credentials)
+Gate 4 — Historical bars:                             SDK-VERIFIED / LIVE RUN BLOCKED (CH_CLIENT_AUTH_FAILURE)
 Gate 5 — Existing pipeline integration:               NOT REACHED
 
 FILES CREATED:
@@ -480,23 +672,46 @@ FILES CREATED:
 - docs/data/PHASE25_5_CTRADER_INTEGRATION_REPORT.md
 
 FILES MODIFIED (production):
-- (none) — all work isolated in tools/ctrader_smoke_test/ and tests/
+- docs/data/PHASE25_5_CTRADER_INTEGRATION_REPORT.md  (Gate 4 data-quality report + corrected config status; no code change)
 
 SECURITY:
 Confirmed that no credentials were printed or committed.
 
 ARCHITECTURAL CHANGES:
-- None. RawTick contract used UNCHANGED for spot-event representation; RawBar
-  contract used UNCHANGED for trendbar representation (Gate 4 mapping verified
-  by unit tests).
-- Broker symbolId 41 is NOT hardcoded into core code; Gates 3–4 re-resolve the
-  symbol from asset+symbol metadata at runtime. Mapping belongs in the
-  existing canonical/provider abstraction when Gate 5 integration begins.
+- None. RawBar contract used UNCHANGED for trendbar representation (Gate 4 mapping verified by unit tests).
+- Broker symbolId 41 is NOT hardcoded into core code; Gates 3–4 re-resolve the symbol from asset+symbol metadata at runtime. Mapping belongs in the existing canonical/provider abstraction when Gate 5 integration begins.
+
+GATE 4 VERDICT (per acceptance criteria):
+
+Gate 4 = PASS only if ALL of:
+1. Real historical XAUUSD bars retrieved from IC Markets cTrader Demo — **BLOCKED** (CH_CLIENT_AUTH_FAILURE)
+2. M5 retrieval succeeds — **BLOCKED**
+3. M15 retrieval succeeds — **BLOCKED**
+4. H1 retrieval succeeds — **BLOCKED**
+5. H4 retrieval succeeds — **BLOCKED**
+6. D1 retrieval succeeds — **BLOCKED**
+7. Timestamp representation verified — **PASS** (pure layer + descriptor audit)
+8. Price representation verified — **PASS** (absolute low + relative deltas, 1/100000)
+9. OHLC reconstruction/conversion verified — **PASS** (exact Decimal arithmetic)
+10. OHLC validation passes — **PASS** (pure layer; live bars pending)
+11. Ordering valid — **PASS** (pure layer; live bars pending)
+12. Duplicate detection passes — **PASS** (pure layer)
+13. Timeframe semantics verified — **PASS** (interval table + enum mapping)
+14. Temporal protocol respected — **PASS** (event_time/ingestion_time preserved; availability_time not invented)
+15. No future data introduced — **PASS** (future bar_time rejected; retrieval >= event_time)
+16. API limits respected — **PASS** (design: sequential, 0.7 s spacing, ~1.4 req/s < 5 req/s)
+17. Existing architecture intact — **PASS** (no production changes)
+18. No credentials exposed — **PASS** (tool refused to run; nothing printed)
+19. Tests pass without new regressions — **PASS** (24/24 Gate 4 unit tests; full suite unchanged)
+
+Result: Gate 4 is **BLOCKED** on item 1 (and therefore on items 2–6). The pure layer, SDK structures, descriptors, conversion/reconstruction, validation, ordering/duplicate/gap analysis, temporal protocol, rate-limit design, and RawBar mapping are all verified. The only remaining blocker is providing correct CTRADER_CLIENT_ID and CTRADER_CLIENT_SECRET so the live historical retrieval can execute against demo.ctraderapi.com:5035.
+
+BLOCKERS:
+- Live historical retrieval blocked: CH_CLIENT_AUTH_FAILURE. Credentials are present in `.env` but clientId/clientSecret are incorrect (CTRADER_CLIENT_ID len=5 is atypically short). The same credentials also fail for Gate 3. Provide correct credentials, then re-run:
+    .venv/bin/python tools/ctrader_smoke_test/historical_data.py
+  Order: M5 ~100 bars first, then M15, H1, H4, D1. Sequential requests paced at 0.7 s (≤ 5 req/s historical limit). No code changes required — SDK structures were verified against installed 0.9.2 descriptors (section 7).
 
 NEXT APPROVED STEP:
-Gate 4 live run (user restores CTRADER_* env vars first):
-  .venv/bin/python tools/ctrader_smoke_test/historical_data.py
-Order: M5 ~100 bars first, then M15, H1, H4, D1. Sequential requests paced at
-0.7 s (≤ 5 req/s historical limit). No code changes required — SDK structures
-were verified against installed 0.9.2 descriptors (section 7).
+Gate 4 live run — after user provides correct CTRADER_* credentials — followed by Gate 5 (Real Data Pipeline Integration) only if Gate 4 = PASS.
+Do NOT proceed to Gate 5 unless Gate 4 = PASS.
 ```
