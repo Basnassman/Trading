@@ -62,6 +62,17 @@ Rate limiting (Spotware-documented, getting-started page):
 Known data behavior (Spotware FAQ): trend bars are only created when ticks
 arrive → session gaps (weekends, low liquidity) are LEGITIMATE missing bars.
 Gaps are classified and reported, never silently dropped or filled.
+
+Session-aware alignment (Gate 4 approved change):
+  The schedule metadata resolved dynamically from the ProtoOASymbol
+  (scheduleTimeZone field #26 + schedule field #13: week-anchored
+  ProtoOAInterval seconds — 0 = Sunday 00:00 in the reported TZ, start
+  inclusive / end exclusive) is used to construct a SessionSchedule for
+  the shared temporal alignment model in
+  src/validation/session_alignment.py. Bar-open timestamps are NEVER
+  shifted or re-stamped — only their classification changes. When the
+  metadata is absent (or its time zone cannot be resolved) the existing
+  UTC-midnight modulo alignment applies unchanged.
 """
 
 from __future__ import annotations
@@ -73,6 +84,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from dotenv import load_dotenv
+
+from src.validation.session_alignment import SessionSchedule
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -191,10 +204,73 @@ def validate_bar(bar: BarRecord) -> list[str]:
     return errs
 
 
-def analyze_series(bars: list[BarRecord], interval_minutes: int) -> dict:
+# ─────────────────────────────────────────────────────────────────────────────
+# Session schedule construction (Gate 4 approved change)
+#
+# The session-alignment policy comes ONLY from the dynamically resolved
+# ProtoOASymbol metadata (scheduleTimeZone #26 + schedule #13, week-anchored
+# ProtoOAInterval seconds). Nothing here contains a broker name, symbol,
+# UTC offset or DST rule: whatever the provider reports IS the policy.
+# Without metadata the existing UTC-midnight fallback applies unchanged.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def schedule_from_proto_symbol(sym) -> tuple[str | None,
+                                              list[tuple[int, int]]]:
+    """Extract (scheduleTimeZone, week-anchored intervals) from a resolved
+    ProtoOASymbol. Pure extraction of provider-reported fields; the caller
+    decides the policy. Returns (None, []) when the fields are absent."""
+    tz_name = None
+    try:
+        if sym.HasField("scheduleTimeZone"):
+            tz_name = str(sym.scheduleTimeZone)
+    except (ValueError, AttributeError):
+        tz_name = None          # field not present on this message type
+    intervals = [(int(iv.startSecond), int(iv.endSecond))
+                 for iv in getattr(sym, "schedule", ())]
+    return tz_name, intervals
+
+
+def build_session_schedule(
+    schedule_tz_name: str | None,
+    intervals_week_seconds: list[tuple[int, int]] | None,
+):
+    """Build the shared session-aware alignment validator from metadata.
+
+    Returns None when metadata is absent/empty so callers transparently
+    keep the pre-existing (schedule=None) fallback behavior. An
+    unresolvable time-zone name still yields a validator (the shared
+    model itself then falls back to UTC-midnight per bar).
+    """
+    from src.validation.session_alignment import TemporalAlignmentValidator
+
+    if not schedule_tz_name or not intervals_week_seconds:
+        return None
+    return TemporalAlignmentValidator(SessionSchedule(
+        schedule_tz_name=str(schedule_tz_name).strip(),
+        intervals_week_seconds=tuple(
+            (int(s), int(e)) for s, e in intervals_week_seconds)))
+
+
+def analyze_series(
+    bars: list[BarRecord],
+    interval_minutes: int,
+    schedule=None,
+    timeframe: str | None = None,
+) -> dict:
     """Ordering / duplicates / alignment / gap analysis for one timeframe.
 
     Pure function; reports anomalies explicitly, drops nothing.
+
+    Alignment (Gate 4): when `schedule` (a TemporalAlignmentValidator built
+    from provider schedule metadata; a SessionSchedule is also accepted) is
+    supplied, bar-open alignment is classified by that shared session-aware
+    model — the SAME model used by src/validation/validators.py, so there is
+    only one alignment algorithm. Raw utcTimestampInMinutes values are never
+    shifted or re-stamped; only the classification changes. With
+    schedule=None the pre-existing UTC-midnight modulo rule applies
+    unchanged.
+
     Gap semantics (Spotware FAQ): bars exist only where ticks arrived, so
     gaps larger than one interval are expected market/session gaps; a jump
     that is NOT an integer multiple of the interval indicates malformed data.
@@ -245,11 +321,32 @@ def analyze_series(bars: list[BarRecord], interval_minutes: int) -> dict:
             report["session_gaps"] += 1
             report["max_gap_minutes"] = max(report["max_gap_minutes"],
                                             int(diff_min))
-    if any(b.ts_minutes is not None and b.ts_minutes % interval_minutes != 0
-           for b in bars):
-        report["misaligned_bars"] = sum(
-            1 for b in bars
-            if b.ts_minutes is not None and b.ts_minutes % interval_minutes != 0)
+    if schedule is not None:
+        # Session-aware classification via the shared model. Each record's
+        # own timeframe is used; findings echo the raw instants verbatim.
+        validator = schedule
+        if not hasattr(validator, "validate_bar_time"):
+            from src.validation.session_alignment import (
+                TemporalAlignmentValidator,
+            )
+            validator = TemporalAlignmentValidator(schedule)
+        records = [(b, b.bar_time) for b in bars if b.bar_time is not None]
+        findings = [validator.validate_bar_time(bt, rec.timeframe)
+                    for rec, bt in records]
+        report["alignment_mode"] = validator.mode
+        report["misaligned_bars"] = sum(1 for f in findings if not f.aligned)
+        report["alignment_detail"] = [
+            {"ts_minutes": rec.ts_minutes, "aligned": f.aligned,
+             "mode": f.mode, "detail": f.detail}
+            for (rec, _bt), f in zip(records, findings) if not f.aligned][:5]
+    else:
+        report["alignment_mode"] = "utc_midnight_fallback"
+        if any(b.ts_minutes is not None
+               and b.ts_minutes % interval_minutes != 0 for b in bars):
+            report["misaligned_bars"] = sum(
+                1 for b in bars
+                if b.ts_minutes is not None
+                and b.ts_minutes % interval_minutes != 0)
     report["ordered"] = (report["duplicates"] == 0
                          and report["reversed"] == 0
                          and report["overlaps"] == 0)
@@ -296,9 +393,15 @@ def build_raw_bar(bar: BarRecord, provider_symbol: str = "XAUUSD"):
     )
 
 
-def summarize_timeframe(bars: list[BarRecord], interval_minutes: int) -> dict:
+def summarize_timeframe(
+    bars: list[BarRecord],
+    interval_minutes: int,
+    schedule=None,
+    timeframe: str | None = None,
+) -> dict:
     """Aggregate validation results for one timeframe (pure)."""
-    series = analyze_series(bars, interval_minutes)
+    series = analyze_series(bars, interval_minutes,
+                            schedule=schedule, timeframe=timeframe)
     invalid = [(i, b) for i, b in enumerate(bars, 1) if b.validation_errors]
     o = [b.ohlc for b in bars]
     return {
@@ -342,12 +445,14 @@ def load_env() -> dict[str, str]:
 
 # Target bars per timeframe and request windows (deliberately small samples;
 # windows include weekend cushion and stay far below any documented cap).
+# Gate 4 live run: 120 bars required per timeframe; windows sized so the
+# requested count (bars + 20 headroom) is reachable across weekends/holidays.
 SAMPLE_PLAN = {
-    "M5":  {"bars": 100, "window_days": 2},
-    "M15": {"bars": 100, "window_days": 4},
-    "H1":  {"bars": 100, "window_days": 10},
-    "H4":  {"bars": 100, "window_days": 30},
-    "D1":  {"bars": 100, "window_days": 140},
+    "M5":  {"bars": 120, "window_days": 3},
+    "M15": {"bars": 120, "window_days": 5},
+    "H1":  {"bars": 120, "window_days": 14},
+    "H4":  {"bars": 120, "window_days": 45},
+    "D1":  {"bars": 120, "window_days": 200},
 }
 INTER_REQUEST_DELAY_S = 0.7  # ~1.4 req/s historical; limit is 5 req/s
 
@@ -376,7 +481,9 @@ def run_historical_test(config: dict[str, str]) -> bool:
         "clean_disconnect": False,
     }
     tf_bars: dict[str, list[BarRecord]] = {}
-    state = {"ctid": None, "symbol_id": None, "digits": 2, "finished": False}
+    state = {"ctid": None, "symbol_id": None, "digits": 2,
+             "schedule_tz": None, "intervals_week_seconds": [],
+             "schedule": None, "finished": False}
 
     def finish() -> None:
         if state["finished"]:
@@ -389,7 +496,9 @@ def run_historical_test(config: dict[str, str]) -> bool:
         log("=" * 60)
         for tf in SAMPLE_PLAN:
             bars = tf_bars.get(tf, [])
-            s = summarize_timeframe(bars, TIMEFRAME_MINUTES[tf])
+            s = summarize_timeframe(bars, TIMEFRAME_MINUTES[tf],
+                                    schedule=state.get("schedule"),
+                                    timeframe=tf)
             log(f"[{tf}] bars={s['count']} invalid={s['invalid_bars']} "
                 f"ordered={s['ordered']} duplicates={s['duplicates']} "
                 f"reversed={s['reversed']} overlaps={s['overlaps']} "
@@ -405,6 +514,12 @@ def run_historical_test(config: dict[str, str]) -> bool:
                 log(f"      anomalies: {s['anomalies'][:5]}")
         log(f"RawBar mapping: existing contract used unchanged; "
             f"availability_time NOT invented (API provides none)")
+        sched = state.get("schedule")
+        log("Session-aware alignment: "
+            + (f"schedule tz={sched.schedule.schedule_tz_name} "
+               f"(from resolved symbol metadata; mode={sched.mode})"
+               if sched is not None else
+               "no schedule metadata — existing UTC-midnight fallback"))
         log(f"Rate limit compliance (≤5 req/s historical, sequential, "
             f"{INTER_REQUEST_DELAY_S}s spacing): "
             f"{'PASS' if results['rate_limit_compliance'] else 'FAIL'}")
@@ -465,7 +580,8 @@ def run_historical_test(config: dict[str, str]) -> bool:
             bars.append(rec)
         tf_bars[tf] = bars
 
-        s = summarize_timeframe(bars, TIMEFRAME_MINUTES[tf])
+        s = summarize_timeframe(bars, TIMEFRAME_MINUTES[tf],
+                                schedule=state.get("schedule"), timeframe=tf)
         ok = (s["count"] >= plan["bars"] and s["invalid_bars"] == 0
               and s["ordered"] and s["duplicates"] == 0
               and s["reversed"] == 0 and s["overlaps"] == 0
@@ -578,7 +694,13 @@ def run_historical_test(config: dict[str, str]) -> bool:
             if handle_error(detail_res, "SymbolById"):
                 finish()
                 return
-            state["digits"] = Protobuf.extract(detail_res).symbol[0].digits
+            resolved_symbol = Protobuf.extract(detail_res).symbol[0]
+            state["digits"] = resolved_symbol.digits
+            # Gate 4 approved change: capture the schedule metadata reported
+            # by the broker for the dynamically resolved symbol. No names,
+            # offsets or DST rules are supplied from anywhere else.
+            state["schedule_tz"], state["intervals_week_seconds"] = \
+                schedule_from_proto_symbol(resolved_symbol)
             log(f"Step: Symbol resolved — PASS (XAUUSD "
                 f"symbolId={state['symbol_id']} digits={state['digits']})")
             results["symbol_resolved"] = True
@@ -586,6 +708,21 @@ def run_historical_test(config: dict[str, str]) -> bool:
             log(f"Symbol resolution — FAIL: {type(e).__name__}: {e}")
             finish()
             return
+
+        # Session-aware alignment policy: built EXCLUSIVELY from the
+        # broker-reported symbol schedule metadata captured above. With no
+        # metadata (None), every consumer keeps the existing UTC-midnight
+        # fallback behavior unchanged.
+        state["schedule"] = build_session_schedule(
+            state["schedule_tz"], state["intervals_week_seconds"])
+        if state["schedule"] is not None:
+            log(f"Step: Session schedule from symbol metadata — PASS "
+                f"(tz={state['schedule_tz']}, "
+                f"{len(state['intervals_week_seconds'])} interval(s), "
+                f"alignment mode={state['schedule'].mode})")
+        else:
+            log("Step: Session schedule NOT reported by symbol metadata — "
+                "temporal alignment uses the existing UTC-midnight fallback")
 
         # Sequential historical requests, paced below the 5 req/s limit
         for tf in SAMPLE_PLAN:

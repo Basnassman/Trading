@@ -13,6 +13,10 @@ from typing import Optional
 
 from src.canonical.raw import RawBar, RawTick
 from src.errors.exceptions import InvalidData
+from src.validation.session_alignment import (
+    SessionSchedule,
+    TemporalAlignmentValidator,
+)
 
 
 @dataclass(frozen=True)
@@ -168,8 +172,59 @@ class TickValidator:
 
 
 class TemporalValidator:
-    """Validates temporal ordering and gaps."""
-    
+    """Validates temporal ordering, alignment and gaps.
+
+    Optional session-aware alignment: when a SessionSchedule (provider
+    symbol schedule metadata) is supplied AND its time zone is resolvable,
+    alignment classification is delegated to the DST-aware anchor model in
+    src/validation/session_alignment.py. When schedule is None (or the
+    zone cannot be resolved), the pre-existing UTC-midnight modulo
+    alignment rule applies unchanged. Timestamps are never modified.
+    """
+
+    def __init__(
+        self,
+        schedule: Optional[SessionSchedule] = None,
+    ) -> None:
+        self._alignment = TemporalAlignmentValidator(schedule)
+
+    @property
+    def alignment_mode(self) -> str:
+        """Active alignment mode.
+
+        "session" when a resolvable schedule is supplied; otherwise the
+        pre-existing "utc_midnight_fallback" mode.
+        """
+        return self._alignment.mode
+
+    def alignment_finding(
+        self,
+        bar_time: datetime,
+        timeframe: str,
+    ):
+        """Session-aware classification of one bar-open timestamp.
+
+        Single shared alignment model (used by analyze_series too).
+        Read-only: returns a finding; never mutates the timestamp.
+        """
+        return self._alignment.validate_bar_time(bar_time, timeframe)
+
+    def classify_alignment(
+        self,
+        bars: list[RawBar],
+        timeframe: str,
+    ) -> dict:
+        """Session-aware alignment/gap classification for a bar series.
+
+        Delegates to the shared TemporalAlignmentValidator (see
+        session_alignment.py). Read-only report; never mutates bars.
+        """
+        times = [
+            getattr(b, "bar_time", None) or b.temporal.event_time.value
+            for b in bars
+        ]
+        return self._alignment.classify_series(times, timeframe)
+
     def validate_ordering(
         self,
         bars: list[RawBar],
@@ -208,7 +263,9 @@ class TemporalValidator:
         if len(bars) < 2:
             return gaps
         
-        # Expected interval based on timeframe
+        # Expected interval based on timeframe (existing fallback rule —
+        # unchanged; session-aware classification is separate, via
+        # classify_alignment / the shared alignment model)
         intervals = {
             "M1": timedelta(minutes=1),
             "M5": timedelta(minutes=5),

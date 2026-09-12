@@ -1,0 +1,222 @@
+# 📋 Technical Status Report (TSR)
+### MT5 AI/ML Trading Bot — Enterprise Edition
+> **Generated:** 2026-09-12 | **Project:** xauusd-trading-system v0.1.0 | **Author:** triqbit
+> **Purpose:** Hand-off document for developer resumption
+
+---
+
+## 1. 🟢 Architecture Overview & Readiness Score
+
+### Architectural Style
+- **Hybrid Event-Driven + Procedural Pipeline** — The system follows a sequential polling loop (`run_live` in `main.py`) that orchestrates a pipeline of components. Within each loop iteration, data flows through a well-defined cascade: **Data Ingestion → Feature Engineering → Model Inference → Risk Assessment → Execution Filter → Order Placement → State Reconciliation**.
+- **OOP with Abstract Interfaces** — The `src/engines/interfaces.py` defines a comprehensive set of abstract engine contracts (15+ engine interfaces: MarketStructure, Liquidity, Flow, Trend, Momentum, Volatility, GSI, NewsMacro, HistoricalSimilarity, Regime, Evidence, Probability, Setup, Risk, NoTrade, Decision, TradeManagement). These define the *target architecture* but are **not yet implemented** as concrete classes.
+- **Pydantic Settings V2** for all configuration (`TradingConfig` with 100+ fields).
+- **SQLAlchemy 2.0** ORM with Alembic migrations for persistence.
+- **Circuit Breaker + Retry** resilience patterns (`CircuitBreaker`, `@with_retry`).
+- **Prometheus + Structlog + Telegram** for observability.
+- **Docker multi-stage** deployment ready.
+
+### Data Flow
+```
+┌─────────────┐    ┌──────────────────┐    ┌────────────────┐
+│ MT5 MetaAPI  │───▶│ Feature Engineer  │───▶│ AI/ML Models   │
+│ (Dual-path)  │    │ (140+ features)   │    │ (Ensemble/DRL) │
+└─────────────┘    └──────────────────┘    └───────┬────────┘
+                                                   │
+                    ┌──────────────────┐    ┌───────▼────────┐
+                    │ Trade Execution   │◀───│ Risk Manager    │
+                    │ (MT5Connector)    │    │ (8-layer gate)  │
+                    └───────┬──────────┘    └───────▲────────┘
+                            │                       │
+                    ┌───────▼──────────┐    ┌───────┴────────┐
+                    │ State Reconcile   │    │ Execution Filter│
+                    │ (TradeLogger)     │    │ (11-layer gate) │
+                    └──────────────────┘    └────────────────┘
+```
+
+### Components Overview
+| Layer | Component | Status |
+|-------|-----------|--------|
+| Config | `TradingConfig` (Pydantic V2) | ✅ Complete |
+| Connectivity | `MT5Connector` (Native SDK + MetaAPI fallback) | ✅ Complete |
+| Feature Engineering | `FeatureEngineer` (140+ features, MTF) | ✅ Complete |
+| AI Models | Ensemble, PPO, Dreamer, LSTM, Transformer | ✅ Complete |
+| Risk Management | `RiskManager` (8-layer) | ✅ Complete |
+| Execution Filter | `ExecutionFilter` (11-layer) | ✅ Complete |
+| Capital Allocation | `CapitalAllocator` (Ray Dalio All-Weather) | ✅ Complete |
+| Backtesting | `BacktestEngine` (Walk-forward) | ✅ Complete |
+| Trade Logging | `TradeLogger` (SQLite + Audit) | ✅ Complete |
+| Monitoring | `Monitor` (Prometheus + Telegram) | ✅ Complete |
+| Decision Support | `DecisionSupportSystem` + `SignalExplainer` | ✅ Complete |
+| Resilience | `CircuitBreaker` + `@with_retry` | ✅ Complete |
+| Database | SQLAlchemy 2.0 + Alembic | ✅ Complete |
+| Security | Secret masking, env vars, file permissions | ✅ Complete |
+| Engine Contracts | `src/engines/interfaces.py` (15+ abstract engines) | ⚠️ Interfaces only |
+| Canonical Data | `src/canonical/` (contracts, enums, types) | ⚠️ Partial |
+
+### Overall Readiness Estimate: **72% Ready**
+
+---
+
+## 2. 🛠️ Implemented Components (Done)
+
+### Core Infrastructure
+- **`src/core/config.py`** — 100+ field Pydantic settings with env var binding, SecretStr for passwords, validation patterns, environment-based config loading.
+- **`src/core/database.py`** — Centralized SQLAlchemy engine factory with connection pooling, SQLite WAL mode, slow query logging, secure file permissions (0o600/0o700).
+- **`src/core/resilience.py`** — Full Circuit Breaker implementation (CLOSED → OPEN → HALF_OPEN transitions) with configurable thresholds and monitor integration.
+- **`src/core/retry.py`** — `@with_retry` decorator for transient failure recovery.
+- **`src/core/exceptions.py`** — Centralized exception hierarchy (`TradingError` → `MT5ConnectionError`, `MT5DataError`, `MT5ExecutionError`, `CircuitBreakerError`, `ConfigurationError`).
+- **`src/core/log_config.py`** — Structlog configuration with secret masking processor.
+- **`src/core/monitor.py`** — Prometheus metrics (30+ gauges/counters/histograms), Telegram alerting, system metrics collection (CPU/memory/disk).
+- **`src/core/profiler.py`** — Performance profiling context manager.
+- **`src/core/audit_log.py`** — Enterprise audit trail logging.
+
+### Trading Engine
+- **`src/trading/mt5_connector.py`** — Dual-path connector (Native MT5 SDK + MetaAPI Cloud fallback) with circuit breaker wrapping every method, retry logic, connection state management, and comprehensive error handling for all MT5 retcodes.
+- **`src/trading/risk_manager.py`** — 8-layer risk cascade: Circuit Breaker, Daily Loss, Max Positions, Symbol Allocation, Minimum Confidence, Risk:Reward, Consecutive Losses, Model Health. Includes Kelly Criterion position sizing and Ray Dalio All-Weather allocation weights.
+- **`src/trading/execution_filter.py`** — 11-layer entry filter cascade: ATR Volatility, Trend Angle, EMA Sequence, Momentum, Session/Time, Drawdown Limit, Model Stability, Performance Guard, Confidence Threshold, Signal Consistency, Macro Risk Gate.
+- **`src/trading/capital_allocator.py`** — Institutional capital allocation with strategy-level budgeting and performance feedback loops.
+- **`src/trading/backtester.py`** — Walk-forward backtesting engine with vectorized exit simulation, MAE/MFE tracking, and institutional performance metrics (Sharpe, Profit Factor, Recovery Factor).
+- **`src/trading/trading_env.py`** — Gymnasium-compatible trading environment for RL training.
+
+### AI/ML Models
+- **`src/models/base_model.py`** — Standardized model interface (`predict()`, `observe_outcome()`, `get_health_metrics()`).
+- **`src/models/dynamic_ensemble.py`** — Adaptive model weighting based on real-time performance.
+- **`src/models/ppo_agent.py`** — Proximal Policy Optimization implementation.
+- **`src/models/dreamer_agent.py`** — Dreamer V3 world model.
+- **`src/models/lstm_model.py`** — LSTM-based sequence model.
+- **`src/models/transformer_model.py`** — Transformer architecture.
+- **`src/models/regime_detector.py`** — Market regime classification.
+- **`src/models/calibration.py`** — Model calibration utilities.
+
+### Feature Engineering & Data
+- **`src/core/feature_engineering.py`** — 140+ features: TA-Lib technical indicators, multi-timeframe analysis, candle patterns, volume profile, price action features. Stateful normalization support.
+- **`src/data/event_intelligence.py`** — Macro event intelligence with risk multiplier calculations.
+- **`src/data/event_models.py`** — Event data models.
+
+### Decision Support & Explainability
+- **`src/core/decision_support.py`** — Institutional decision cockpit assembly and rendering.
+- **`src/core/explainability.py`** — Signal attribution breakdowns.
+- **`src/core/schemas.py`** — Centralized Pydantic schemas (`TradeSignal`, etc.).
+
+### Persistence & Logging
+- **`src/persistence/models.py`** — SQLAlchemy ORM models: MarketBar, Tick, Spread, DataSource, DataQualityRecord, IngestionRun.
+- **`src/core/trade_logger.py`** — Trade lifecycle logging with SQLite persistence.
+
+### Testing
+- **166 test files** detected across `tests/` — unit, integration, e2e, regression, benchmarks, property-based tests, contracts, temporal tests.
+- **CI/CD**: GitHub Actions workflow with linting, security audits, and tests.
+
+### DevOps & Deployment
+- **`Dockerfile`** — Multi-stage production build.
+- **`Dockerfile.dev`** — Development build.
+- **`docker-compose.yml`** — Full stack orchestration.
+- **`Makefile`** — Standardized commands (demo-synthetic, demo-rl, etc.).
+- **`alembic.ini`** + `migrations/` — Database migration support.
+
+---
+
+## 3. ⚠️ Critical Technical Gaps & Missing Features (Backlog)
+
+### 3.1 Error Handling & Reconnection Logic
+- **Partial reconnection**: `MT5Connector` has retry wrappers but `run_live()` in `main.py` has a `try/except` reconnection block that only catches `MT5ConnectionError` at the outer level. **No exponential backoff** — uses flat `time.sleep(poll_interval)` or `time.sleep(5)`.
+- **No dead-letter queue**: Failed orders are logged but there is no retry queue or compensation mechanism for partially filled orders.
+- **MetaAPI async handling**: `nest_asyncio` is used as a workaround. The async-to-sync bridge (`_run_async`) may cause issues in production under load.
+- **Gap**: No health-check heartbeat to detect zombie connections where the TCP socket is alive but MT5 is unresponsive.
+
+### 3.2 Risk Management
+- **✅ Implemented**: 8-layer risk cascade, Kelly sizing, circuit breaker, daily loss limits, consecutive loss protection, model health gating.
+- **❌ Missing — Trailing Stop Loss**: Stop-loss is set at entry (`price ± 2*ATR`) and **never modified**. No trailing stop, no break-even logic, no partial close on profit.
+- **❌ Missing — Position-Level Risk**: `RiskManager` tracks positions by symbol→ticket dict, but does not monitor per-position drawdown or unrealized P&L.
+- **❌ Missing — Correlation-Based Exposure**: The `ALLOCATION_WEIGHTS` dict is static. No dynamic correlation matrix to prevent correlated positions (e.g., EURUSD + GBPUSD both long).
+- **❌ Missing — Margin Monitoring**: `TradingConfig` has `margin_halt_pct` and `margin_liquidation_pct` fields, but **no code reads margin utilization** from MT5 to enforce these limits.
+- **❌ Missing — Slippage Modeling in Live**: Backtester has spread/commission simulation, but live execution has no slippage tracking or reporting.
+
+### 3.3 State Management & Logging
+- **Trade state is partially in-memory**: `RiskManager.open_positions` is a dict in memory. If the process crashes, open position tracking is lost. Only `TradeLogger` persists trades to SQLite.
+- **No reconciliation on startup**: The bot does not reconcile its in-memory state with MT5's actual open positions on startup. If restarted, `open_positions` is empty.
+- **Audit trail exists** (`src/core/audit_log.py`) but is SQLite-based — no structured log shipping to external systems (ELK, Loki, etc.).
+- **No event sourcing**: Trade decisions are logged but not as an immutable event stream for replay/debugging.
+
+### 3.4 Security
+- **✅ Implemented**: SecretStr for passwords, 0o600 file permissions on .env and SQLite, secret masking in logs, periodic config audit snapshots.
+- **❌ Missing — API Key Encryption at Rest**: Credentials are stored in plaintext `.env` file (protected by filesystem permissions only). No encryption at rest.
+- **❌ Missing — Role-Based Access Control**: No concept of operator roles. Anyone with shell access has full control.
+- **❌ Missing — Trade Approval Workflow**: Live trades execute without human approval. The `--confirm-live` flag is a CLI gate, not a runtime safety mechanism.
+- **❌ Missing — Secrets Rotation**: No mechanism to rotate MT5 passwords or MetaAPI tokens without restarting.
+
+### 3.5 Engine Architecture Gap
+- **`src/engines/interfaces.py`** defines 15+ abstract engine interfaces (MarketStructure, Liquidity, Flow, Trend, Momentum, Volatility, GSI, NewsMacro, HistoricalSimilarity, Regime, Evidence, Probability, Setup, Risk, NoTrade, Decision, TradeManagement).
+- **None of these have concrete implementations.** The current system uses a monolithic approach in `main.py` that bypasses these interfaces entirely.
+- The canonical data contracts (`src/canonical/contracts.py`) define rich types (`CanonicalBar`, `CanonicalSwing`, `CanonicalSetup`, `CanonicalDecision`, etc.) but are not wired into the live loop.
+
+### 3.6 Operational Gaps
+- **No circuit breaker state persistence**: If the bot restarts, circuit breaker state resets to CLOSED.
+- **No graceful shutdown**: `KeyboardInterrupt` is caught but there's no orderly position closure or state flush.
+- **No hot-reload**: Configuration changes require a full restart.
+- **No backtest-to-live parity verification**: No automated check that backtest signal generation matches live signal generation.
+
+---
+
+## 4. 🚀 Developer Action Items (Next Sprint)
+
+### Priority 1 — Critical (Safety & Reliability)
+| # | Action | File(s) | Rationale |
+|---|--------|---------|-----------|
+| 1 | **Implement trailing stop-loss** in `run_live()` or `MT5Connector`. After order fill, periodically call `mt5.order_modify()` to trail SL by 1.5×ATR. | `main.py` (run_live), `src/trading/mt5_connector.py` | Without trailing SL, all trades exit at fixed SL/TP — severe P&L degradation in trending markets. |
+| 2 | **Add startup reconciliation**: On boot, fetch open positions from MT5 and reconcile with `RiskManager.open_positions`. Close orphaned in-memory entries. | `main.py` (main function), `src/trading/risk_manager.py` | Prevents ghost position tracking after restarts. |
+| 3 | **Implement margin utilization monitoring**: Fetch `margin_level` from `mt5.account_info()` and enforce `margin_halt_pct` / `margin_liquidation_pct` thresholds. | `src/trading/mt5_connector.py`, `src/trading/risk_manager.py` | Config fields exist but no enforcement code. Critical for preventing margin calls. |
+| 4 | **Add exponential backoff** to reconnection logic in `run_live()`. Replace flat `time.sleep(5)` with backoff (5s → 10s → 30s → 60s, capped). | `main.py` (lines ~150-170) | Prevents hammering the broker during extended outages. |
+
+### Priority 2 — Important (Production Readiness)
+| # | Action | File(s) | Rationale |
+|---|--------|---------|-----------|
+| 5 | **Implement the abstract engine interfaces** in `src/engines/interfaces.py` as concrete classes. Start with `MarketStructureEngine` and `LiquidityEngine`. | `src/engines/` (new files) | The target architecture defines 15+ engines but none are implemented. This is the biggest architectural gap. |
+| 6 | **Wire canonical data contracts** into the live loop. Replace ad-hoc dict-based data passing with `CanonicalBar`, `CanonicalSetup`, `CanonicalDecision`. | `src/canonical/`, `main.py` | Type safety and contract enforcement for the engine pipeline. |
+| 7 | **Add slippage tracking**: After order fill, compute `|expected_price - fill_price|` and record in `Monitor.slippage_histogram`. | `main.py`, `src/core/monitor.py` | No visibility into real execution quality. |
+| 8 | **Implement correlation-based exposure check** in `RiskManager`: compute rolling correlation matrix of open positions and block if correlation > 0.8. | `src/trading/risk_manager.py` | Prevents concentrated risk from correlated FX pairs. |
+
+### Priority 3 — Nice-to-Have (Polish)
+| # | Action | File(s) | Rationale |
+|---|--------|---------|-----------|
+| 9 | **Add structured log shipping** (JSON logs to stdout for Docker log drivers, optional Loki/Promtail integration). | `src/core/log_config.py` | Current structlog dev renderer is not machine-parseable for production. |
+| 10 | **Implement graceful shutdown** handler (SIGTERM/SIGINT) that closes open positions (optional) and flushes audit logs. | `main.py` | Prevents data loss on container orchestration signals. |
+| 11 | **Add circuit breaker state persistence** to SQLite so restarts don't reset protection. | `src/core/resilience.py` | Prevents immediate re-failure after restart during broker outage. |
+| 12 | **Add backtest-to-live parity test**: Run the same signal through backtester and live mock, assert identical behavior. | `tests/` (new) | Catches drift between backtest and live execution paths. |
+
+---
+
+## 📊 Summary Metrics
+
+| Metric | Value |
+|--------|-------|
+| **Total Python Modules** | 60+ (src/) |
+| **Test Files** | 166 |
+| **Lines of Config Fields** | 100+ (TradingConfig) |
+| **Risk Layers (combined)** | 19 (8 risk + 11 execution filter) |
+| **AI Model Architectures** | 5 (Ensemble, PPO, Dreamer, LSTM, Transformer) |
+| **Feature Count** | 140+ |
+| **Prometheus Metrics** | 30+ |
+| **Engine Interfaces Defined** | 15+ (0 implemented) |
+| **Production Readiness** | **72%** |
+
+---
+
+## 🔗 Key Entry Points for Developer
+
+| File | Purpose |
+|------|---------|
+| `main.py` | CLI entrypoint, main trading loop (`run_live`, `run_backtest`) |
+| `src/core/config.py` | All configuration (read this first) |
+| `src/trading/mt5_connector.py` | Exchange connectivity |
+| `src/trading/risk_manager.py` | Risk authority |
+| `src/trading/execution_filter.py` | Signal validation cascade |
+| `src/core/feature_engineering.py` | 140+ feature pipeline |
+| `src/models/dynamic_ensemble.py` | Model ensemble logic |
+| `src/core/monitor.py` | Observability stack |
+| `src/engines/interfaces.py` | Target architecture contracts |
+| `src/core/exceptions.py` | Error hierarchy |
+
+---
+
+*Report generated for immediate developer hand-off. Review Priority 1 items before any live trading deployment.*
