@@ -1,0 +1,13 @@
+# sibling clone recovery metadata
+
+created_at_utc=2026-09-12T22:55:41.225732+00:00
+sibling_path=/home/EBRAHIM/n/Trading-recovered
+origin_url=https://github.com/Basnassman/Trading.git
+cloned_branch=main
+origin_main_sha=ccc0d747776660250fd32a0b0c15e455a0df54ff
+sibling_main_sha=ccc0d747776660250fd32a0b0c15e455a0df54ff
+fsck_exit_code=0
+fsck_output_tail=''
+fsck_stderr_tail=''
+rev_count=1442
+latest_commit='ccc0d747 docs: update CHANGELOG.md [skip ci]'
