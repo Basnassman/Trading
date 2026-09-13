@@ -1420,6 +1420,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chore(deps)(deps): bump types-requests (#7)
 - Chore(deps)(deps): bump joblib from 1.5.3 to 1.6.0 (#11)
 - Chore(deps)(deps): bump ruff from 0.16.4 to 0.16.6 (#9)
+- Impo
 
 ### Fixed
 - **Dependency Harmonization:** Aligned `python-socketio` version to 5.14.0 across `requirements.txt` and `pyproject.toml` to resolve synchronization mismatches.
