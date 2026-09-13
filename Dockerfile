@@ -33,9 +33,9 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
         sed -i '/--extra-index-url/d' requirements-docker.txt && \
         sed -i 's/+cpu//g' requirements-docker.txt; \
     else \
-        # AMD64: Explicitly use the CPU-optimized wheels from PyTorch's dedicated index
-        sed -i 's/torch==2.3.1/torch==2.3.1+cpu/g' requirements-docker.txt && \
-        sed -i 's/torchvision==0.18.1/torchvision==0.18.1+cpu/g' requirements-docker.txt; \
+        # AMD64: requirements-docker.txt already pins CPU-only wheels from the
+        # PyTorch dedicated index (torch==2.14.0+cpu); no rewrite needed.
+        echo "AMD64: using requirements-docker.txt as-is"; \
     fi
 
 # Initialize virtual environment for isolation

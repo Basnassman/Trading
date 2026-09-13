@@ -11,30 +11,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
+      - name: Install uv (Python 3.12)
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
-          cache: pip
+          python-version: "3.12"
+          enable-cache: true
 
-      - name: Install TA-Lib C library from source
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y build-essential wget
-          wget -q https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib-0.6.4-src.tar.gz
-          tar -xzf ta-lib-0.6.4-src.tar.gz
-          cd ta-lib-0.6.4
-          ./configure --prefix=/usr
-          make -j2
-          sudo make install
-          cd ..
-          rm -rf ta-lib-0.6.4 ta-lib-0.6.4-src.tar.gz
-          sudo ldconfig
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements-ci.txt
+      - name: Sync locked environment
+        run: uv sync --locked --group dev --extra ctrader --extra research
 
       - name: Run Migration Reversibility Check
-        run: python scripts/verify_migrations.py
+        run: uv run python scripts/verify_migrations.py

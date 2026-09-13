@@ -13,6 +13,7 @@ pandas==3.0.5
 TA-Lib==0.7.1
 
 # -- Database ------------------------------------------------------
+psycopg2-binary==2.9.12
 sqlalchemy==2.0.52
 alembic==1.19.2
 redis==8.1.0
@@ -20,6 +21,12 @@ redis==8.1.0
 # -- Pydantic / settings -------------------------------------------
 pydantic==2.13.5
 pydantic-settings==2.15.0
+
+# -- Configuration --------------------------------------------------
+# Aligns with pyproject.toml [project.dependencies]
+python-dotenv==1.2.3
+pyyaml>=6.0
+pytz==2026.3.post1
 
 # -- MetaTrader 5 (Cloud Fallback) ---------------------------------
 metaapi-cloud-sdk==29.1.1
