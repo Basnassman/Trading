@@ -1421,6 +1421,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Chore(deps)(deps): bump joblib from 1.5.3 to 1.6.0 (#11)
 - Chore(deps)(deps): bump ruff from 0.16.4 to 0.16.6 (#9)
 - Impo
+- Chore(deps)(deps): bump numpy from 2.4.6 to 2.5.3 (#17)
+- Chore(deps)(deps): bump scipy from 1.15.3 to 1.18.1 (#18)
+- Chore(deps)(deps): bump optuna from 4.9.0 to 5.0.0 (#16)
+- Chore(deps)(deps): bump ruff from 0.16.6 to 0.16.7 (#20)
+- Chore(deps)(deps): bump scikit-learn from 1.7.2 to 1.9.1 (#19)
+- Chore(deps)(deps): bump types-pyyaml (#15)
+- Chore(deps)(deps): bump psycopg2-binary from 2.9.12 to 2.9.13 (#13)
+- Chore(deps)(deps): bump hypothesis from 6.165.10 to 6.168.0 (#12)
 
 ### Fixed
 - **Dependency Harmonization:** Aligned `python-socketio` version to 5.14.0 across `requirements.txt` and `pyproject.toml` to resolve synchronization mismatches.
