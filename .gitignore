@@ -105,3 +105,4 @@ reports/*
 # Temporary Agent/Sandbox artifacts
 file:*
 test_engine.db
+.aider*

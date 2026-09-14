@@ -22,6 +22,11 @@ permissions:
   contents: write
   pull-requests: read
 
+# ===========================================================
+# All Python steps run through uv against uv.lock (Python 3.12).
+# No ad-hoc pip installs; tools come from the locked dev group.
+# ===========================================================
+
 jobs:
   # -----------------------------------------------------------
   # JOB 1: Validation - Quality, Security, Tests, Compliance, Governance
@@ -34,48 +39,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
+      - name: Install uv (Python 3.12)
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
-          cache: pip
+          python-version: "3.12"
+          enable-cache: true
 
-      - name: Cache TA-Lib
-        id: cache-talib
-        uses: actions/cache@v4
-        with:
-          path: /usr/lib/libta_lib.*
-          key: ${{ runner.os }}-talib-v0.6.4
-
-      - name: Install TA-Lib C library
-        if: steps.cache-talib.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y build-essential wget
-          wget -q https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib-0.6.4-src.tar.gz
-          tar -xzf ta-lib-0.6.4-src.tar.gz
-          cd ta-lib-0.6.4
-          ./configure --prefix=/usr
-          make -j2
-          sudo make install
-          cd ..
-          rm -rf ta-lib-0.6.4 ta-lib-0.6.4-src.tar.gz
-          sudo ldconfig
-
-      - name: Install dependencies
-        run: |
-          pip install ruff==0.16.6 mypy==2.3.1 pip-audit==2.7.3 pip-licenses==5.5.5 pytest pytest-cov
-          pip install -r requirements-ci.txt
+      - name: Sync locked environment
+        run: uv sync --locked --group dev --extra ctrader --extra research
 
       - name: Ruff Check
-        run: ruff check src/ main.py scripts/ tests/
+        run: uv run ruff check src/ main.py scripts/ tests/
 
       - name: Ruff Format Check
-        run: ruff format --check src/ main.py scripts/ tests/
+        run: uv run ruff format --check src/ main.py scripts/ tests/
 
       - name: Mypy Check
-        run: mypy src/ main.py scripts/ --ignore-missing-imports
+        run: uv run mypy src/ main.py scripts/ --ignore-missing-imports
 
       - name: Secret Scanning (Gitleaks)
         uses: gitleaks/gitleaks-action@v2
@@ -84,65 +64,66 @@ jobs:
 
       - name: Dependency Audit
         run: |
-          pip-audit --requirement requirements.txt --ignore-vuln GHSA-g8c6-8fjj-2r4m --ignore-vuln PYSEC-2024-277 --ignore-vuln PYSEC-2026-3042 --ignore-vuln PYSEC-2026-3033 --ignore-vuln PYSEC-2026-3032 --progress-spinner off
-          pip-audit --requirement requirements-ci.txt --ignore-vuln GHSA-g8c6-8fjj-2r4m --ignore-vuln PYSEC-2024-277 --ignore-vuln PYSEC-2026-3042 --ignore-vuln PYSEC-2026-3033 --ignore-vuln PYSEC-2026-3032 --progress-spinner off
+          uv run pip-audit \
+            --ignore-vuln GHSA-g8c6-8fjj-2r4m \
+            --ignore-vuln PYSEC-2024-277 \
+            --ignore-vuln PYSEC-2026-3042 \
+            --ignore-vuln PYSEC-2026-3033 \
+            --ignore-vuln PYSEC-2026-3032 \
+            --progress-spinner off
 
       - name: License Compliance Check
         run: |
-          # Install dependencies for license check
-          ls requirements.txt requirements-ci.txt requirements-linux.txt 2>/dev/null | xargs -r cat | grep -vE "TA-Lib|MetaTrader5" | sort | uniq > requirements-all-scan.txt
-          pip install -r requirements-all-scan.txt || true
-
-          # Enforce allowed licenses according to docs/LICENSE_COMPLIANCE.md
-          pip-licenses \
+          # Scans the locked environment (core + dev + ctrader + research incl. CPU torch)
+          uv run pip-licenses \
             --allow-only "MIT;BSD;Apache;MPL;LGPL;PSF;Unlicense;ISC;Other/Proprietary;UNKNOWN;Python;NVIDIA" \
             --partial-match \
             --ignore-packages pip pip-licenses prettytable wcwidth setuptools
 
-          pip-licenses \
+          uv run pip-licenses \
             --format=markdown \
             --output-file=docs/DEPENDENCY_LICENSES.md \
             --ignore-packages pip pip-licenses prettytable wcwidth setuptools
 
       - name: Verify Dependencies Harmonization
-        run: python scripts/verify_dependencies.py
+        run: uv run python scripts/verify_dependencies.py
 
       - name: Run Tests with Coverage Gate (85%)
-        run: pytest tests/ --cov=src --cov-report=xml --cov-fail-under=85
+        run: uv run pytest tests/ --cov=src --cov-report=xml --cov-fail-under=85
         env:
           MT5_LOGIN: "0"
           MT5_PASSWORD: "test"
           MT5_SERVER: "test"
           MODE: "demo"
 
-      - name: Gate 4.8: Atlas Governance Audit
-        run: python scripts/atlas_audit.py
+      - name: "Gate 4.8: Atlas Governance Audit"
+        run: uv run python scripts/atlas_audit.py
 
       - name: Validate Environment Config
-        run: python scripts/validate_env.py
+        run: uv run python scripts/validate_env.py
 
       - name: Migration Reversibility Check
-        run: python scripts/verify_migrations.py
+        run: uv run python scripts/verify_migrations.py
 
       - name: Validate Release Notes
-        run: python scripts/check_release_notes.py
+        run: uv run python scripts/check_release_notes.py
 
       - name: Research & QA Vitals (Jules02 Integration)
         env:
           PYTHONPATH: .
         run: |
-          python scripts/verify_hyperopt_walkforward.py
-          python scripts/verify_stress_lab.py
-          python scripts/verify_reporting_system.py
-          python scripts/verify_rare_event_reporting.py
-          python scripts/verify_benchmarking.py
-          python scripts/verify_allocator_reporting.py
-          python scripts/verify_backtest_audit.py
-          python scripts/verify_journal_mining.py
-          python scripts/verify_explainability_ui.py
-          python scripts/verify_ux_terminal.py
+          uv run python scripts/verify_hyperopt_walkforward.py
+          uv run python scripts/verify_stress_lab.py
+          uv run python scripts/verify_reporting_system.py
+          uv run python scripts/verify_rare_event_reporting.py
+          uv run python scripts/verify_benchmarking.py
+          uv run python scripts/verify_allocator_reporting.py
+          uv run python scripts/verify_backtest_audit.py
+          uv run python scripts/verify_journal_mining.py
+          uv run python scripts/verify_explainability_ui.py
+          uv run python scripts/verify_ux_terminal.py
           # Generate consolidated audit report
-          python scripts/generate_research_report.py
+          uv run python scripts/generate_research_report.py
 
       - name: Upload Research Reports
         uses: actions/upload-artifact@v4
@@ -156,10 +137,10 @@ jobs:
             research_audit_report.html
 
       - name: Verify Version Synchronization
-        run: python scripts/verify_version_sync.py
+        run: uv run python scripts/verify_version_sync.py
 
       - name: Reliability SLO Audit
-        run: python scripts/verify_slos.py
+        run: uv run python scripts/verify_slos.py
 
       - name: Automated Pre-Prod Checklist Verification
         run: |
@@ -197,16 +178,14 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
+      - name: Install uv (Python 3.12)
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
-          cache: pip
+          python-version: "3.12"
+          enable-cache: true
 
-      - name: Install Release Tools
-        run: |
-          pip install pydantic pydantic-settings sqlalchemy alembic httpx tomli
-          # Required for generate_config_docs.py, smoke_test.py, and package_release.sh validations
+      - name: Sync locked environment
+        run: uv sync --locked --group dev --extra ctrader
 
       - name: Calculate Next Version
         id: tag_action
@@ -242,11 +221,11 @@ jobs:
           VERSION="${{ steps.version.outputs.VERSION }}"
 
           # 1. Update unreleased section with latest commits
-          python scripts/update_changelog.py
+          uv run python scripts/update_changelog.py
 
           # 2. Transition unreleased to versioned header
           chmod +x scripts/bump_version.py
-          python scripts/bump_version.py "${VERSION}"
+          uv run python scripts/bump_version.py "${VERSION}"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -309,8 +288,8 @@ jobs:
             triqbit/mt5-ai-xauusd-trader:${{ steps.version.outputs.TAG }} \
             --mode demo --algo ensemble
 
-          # 3. Wait and verify using smoke_test.py
-          python scripts/smoke_test.py --url http://localhost:8000 --retries 6 --delay 5 || {
+          # 3. Wait and verify using smoke_test.py (stdlib-only script)
+          uv run python scripts/smoke_test.py --url http://localhost:8000 --retries 6 --delay 5 || {
             echo "::error::Final runtime smoke test failed. Inspecting container logs..."
             docker logs release-smoke-test
             exit 1
@@ -338,6 +317,9 @@ jobs:
           VERSION="${{ steps.version.outputs.VERSION }}"
           export VERSION
           export SKIP_DOCKER_BUILD=true
+          # Activate the locked venv so the script's `python3` calls run
+          # against the uv-managed Python 3.12 environment.
+          source .venv/bin/activate
           ./scripts/package_release.sh
 
           # Build local artifact zip

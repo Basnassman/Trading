@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "xauusd-trading-system"
@@ -15,23 +15,43 @@ dependencies = [
     "sqlalchemy>=2.0",
     "alembic>=1.12",
     "psycopg2-binary>=2.9",
-    
+
     # Data processing
     "numpy>=1.24",
     "pandas>=2.0",
-    
-    # Configuration
+
+    # Configuration & validation (directly imported by src/core/config.py etc.)
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
-    
+
     # HTTP (for data providers)
     "httpx>=0.25",
-    
+
     # Logging
     "structlog>=23.0",
-    
+
     # Timezone
     "pytz>=2023.3",
+
+    # Dashboard / operator console (directly imported by src/, main.py)
+    "rich==13.9.4",
+    "jinja2==3.1.6",
+    "fastapi==0.141.1",
+
+    # Monitoring & alerts (directly imported by src/core/monitor.py, health.py)
+    "psutil==7.2.2",
+    "prometheus-client==0.26.0",
+    "redis==8.1.0",
+    "python-telegram-bot==22.8",
+
+    # Model persistence & async bridge (directly imported)
+    "joblib==1.6.0",
+    "nest-asyncio==1.6.0",
+
+    # Hyperparameter optimization (directly imported by src/research/)
+    "optuna==4.9.0",
 ]
 
 [project.optional-dependencies]
@@ -41,11 +61,23 @@ dependencies = [
 ctrader = [
     "ctrader-open-api==0.9.2",
     "Twisted",
+    # Twisted optional TLS hardening; without it the SDK emits a warning and
+    # performs only rudimentary certificate hostname verification.
+    "service-identity",
 ]
-# Legacy MT5 terminal bridge (Windows-only). NOT part of the default uv sync
-# path; kept only for the legacy MetaAPI/MT5 connector code. Never add to core.
+# Legacy MT5/MetaAPI bridge. NOT part of the default uv sync path; kept only
+# for the legacy connector code in src/trading/mt5_connector.py (both imports
+# are guarded there). Never add to core. MetaTrader5 is Windows-only; the
+# MetaAPI cloud SDK is the cross-platform legacy fallback.
 legacy-mt5 = [
     "MetaTrader5; sys_platform == 'win32'",
+    "metaapi-cloud-sdk==29.1.1",
+]
+# Optional TA-Lib Python binding. Requires the TA-Lib C library on the system
+# (Docker builds C v0.6.4 from source). All src/ imports of talib are guarded
+# with a pandas fallback, so this extra is optional everywhere.
+ta-lib = [
+    "TA-Lib==0.7.1",
 ]
 # Research / ML stack. torch comes CPU-only from the PyTorch index (see [tool.uv]).
 research = [

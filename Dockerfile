@@ -1,7 +1,11 @@
 # ============================================================
 # MT5 AI/ML Trading Bot - Enterprise Edition
-# Dockerfile (Python 3.11 slim, multi-stage build)
+# Dockerfile (Python 3.12 slim, multi-stage build, uv-locked)
 # Supporting linux/amd64 and linux/arm64
+#
+# Dependency policy: pyproject.toml + uv.lock are the ONLY build
+# source of truth. requirements*.txt are legacy reference files
+# and are intentionally NOT used by this build.
 # ============================================================
 
 # --- Stage 1: builder ------------------------------------------
@@ -19,33 +23,24 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     wget ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Build TA-Lib from source
+# Build TA-Lib C library from source (required by the TA-Lib Python binding)
 RUN wget -q https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib-0.6.4-src.tar.gz && \
     tar xf ta-lib-0.6.4-src.tar.gz && \
     cd ta-lib-0.6.4 && ./configure --prefix=/usr && make -j$(nproc) && make install
 
-# Prepare requirements
-COPY requirements-docker.txt .
+# Install uv (pinned version, no architecture-specific rewrites needed:
+# the pytorch-cpu index in pyproject.toml [tool.uv] handles CPU-only torch
+# on both amd64 and arm64)
+COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /usr/local/bin/uv
 
-# Architecture-specific adjustments for PyTorch
-RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        # ARM64 (Apple Silicon / AWS Graviton): PyPI provides valid CPU wheels
-        sed -i '/--extra-index-url/d' requirements-docker.txt && \
-        sed -i 's/+cpu//g' requirements-docker.txt; \
-    else \
-        # AMD64: requirements-docker.txt already pins CPU-only wheels from the
-        # PyTorch dedicated index (torch==2.14.0+cpu); no rewrite needed.
-        echo "AMD64: using requirements-docker.txt as-is"; \
-    fi
+# Copy dependency manifests first for layer caching
+COPY pyproject.toml uv.lock ./
 
-# Initialize virtual environment for isolation
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Install Python dependencies
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements-docker.txt
+# Install the locked dependency set (core + ctrader + research + ta-lib;
+# no dev tooling in the image, no legacy MT5). --locked fails the build if
+# pyproject.toml and uv.lock are out of sync.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --extra ctrader --extra research --extra ta-lib
 
 # --- Stage 2: runtime ------------------------------------------
 FROM python:3.12-slim AS runtime
@@ -60,14 +55,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy TA-Lib shared libraries and headers from builder
+# Copy TA-Lib shared libraries from builder (needed by the TA-Lib binding)
 COPY --from=builder /usr/lib/libta_lib* /usr/lib/
-COPY --from=builder /usr/include/ta-lib /usr/include/ta-lib
 RUN ldconfig
 
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Copy the uv-managed virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy application source and assets
 COPY src/ ./src/
