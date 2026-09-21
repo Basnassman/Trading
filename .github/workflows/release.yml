@@ -126,7 +126,7 @@ jobs:
           uv run python scripts/generate_research_report.py
 
       - name: Upload Research Reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: research-vitals-reports
           path: |
@@ -159,7 +159,7 @@ jobs:
           echo "Pre-prod checklist validation passed."
 
       - name: Upload Compliance Report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: compliance-report
           path: docs/DEPENDENCY_LICENSES.md
