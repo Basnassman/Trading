@@ -77,7 +77,7 @@ legacy-mt5 = [
 # (Docker builds C v0.6.4 from source). All src/ imports of talib are guarded
 # with a pandas fallback, so this extra is optional everywhere.
 ta-lib = [
-    "TA-Lib==0.7.1",
+    "TA-Lib==0.8.0",
 ]
 # Research / ML stack. torch comes CPU-only from the PyTorch index (see [tool.uv]).
 research = [
