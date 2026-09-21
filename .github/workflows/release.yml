@@ -300,13 +300,13 @@ jobs:
           echo "SUCCESS: Final runtime smoke test passed."
 
       - name: Download Compliance Report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: compliance-report
           path: docs/
 
       - name: Download Research Reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: research-vitals-reports
           path: .
