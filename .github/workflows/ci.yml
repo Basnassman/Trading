@@ -24,7 +24,7 @@ jobs:
     name: Code Quality
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install uv (Python 3.12)
         uses: astral-sh/setup-uv@v7
         with:
@@ -48,7 +48,7 @@ jobs:
     name: Dependency Safety
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install uv (Python 3.12)
         uses: astral-sh/setup-uv@v7
         with:
@@ -78,7 +78,7 @@ jobs:
     env:
       PYTHONPATH: .
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install uv (Python 3.12)
         uses: astral-sh/setup-uv@v7
         with:
@@ -108,7 +108,7 @@ jobs:
     needs: test
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up QEMU (for multi-platform builds)
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
