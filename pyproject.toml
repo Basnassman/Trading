@@ -51,7 +51,7 @@ dependencies = [
     "nest-asyncio==1.6.0",
 
     # Hyperparameter optimization (directly imported by src/research/)
-    "optuna==4.9.0",
+    "optuna==5.0.0",
 ]
 
 [project.optional-dependencies]
