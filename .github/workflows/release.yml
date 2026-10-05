@@ -58,7 +58,7 @@ jobs:
         run: uv run mypy src/ main.py scripts/ --ignore-missing-imports
 
       - name: Secret Scanning (Gitleaks)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
