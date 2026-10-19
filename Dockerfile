@@ -9,7 +9,7 @@
 # ============================================================
 
 # --- Stage 1: builder ------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 ARG TARGETARCH
 WORKDIR /app
@@ -43,7 +43,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --extra ctrader --extra research --extra ta-lib
 
 # --- Stage 2: runtime ------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 WORKDIR /app
 
